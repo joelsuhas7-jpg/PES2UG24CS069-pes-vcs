@@ -137,9 +137,18 @@ int index_load(Index *index) {
 int index_save(const Index *index) {
     // TODO: Implement atomic index saving
     // (See Lab Appendix for logical steps)
-    (void)index;
-    return -1;
-}
+    // Write to temporary file
+    char tmp_path[520];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", INDEX_FILE);
+    
+    FILE *f = fopen(tmp_path, "w");
+    if (!f) return -1;
+    
+    // Create array of pointers for sorting without copying the whole structure
+    IndexEntry *sorted_ptrs[MAX_INDEX_ENTRIES];
+    for (int i = 0; i < index->count; i++) {
+        sorted_ptrs[i] = (IndexEntry *)&index->entries[i];
+    }
 
 // Stage a file for the next commit.
 //
