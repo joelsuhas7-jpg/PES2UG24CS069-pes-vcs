@@ -72,12 +72,7 @@ int index_status(const Index *index) {
             }
         }
     }
-    if (unstaged_count == 0) printf("  (nothing to show)\n");
-    printf("\n");
 
-    printf("Untracked files:\n");
-    int untracked_count = 0;
-    DIR *dir = opendir(".");
     if (dir) {
         struct dirent *ent;
         while ((ent = readdir(dir)) != NULL) {
