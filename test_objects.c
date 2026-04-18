@@ -1,86 +1,107 @@
-// test_objects.c — Phase 1 test program
+// pes.c — CLI entry point and command dispatch
 //
-// Compile and run:
-//   gcc -Wall -Wextra -O2 -o test_objects test_objects.c object.c -lcrypto
-//   ./test_objects
+// This file is PROVIDED. Do not modify.
 
 #include "pes.h"
+#include "index.h"
+#include "commit.h"
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <assert.h>
-#include <stdlib.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
-// Forward declarations for object.c functions
-int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
-int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out);
-int object_exists(const ObjectID *id);
-void object_path(const ObjectID *id, char *path_out, size_t path_size);
+// ─── PROVIDED: Command Implementations ──────────────────────────────────────
 
-void test_blob_storage(void) {
-    const char *content = "Hello, PES-VCS!\n";
-    ObjectID id;
+// Usage: pes init
+void cmd_init(void) {
+    if (mkdir(PES_DIR, 0755) != 0 && access(PES_DIR, F_OK) != 0) {
+        fprintf(stderr, "error: failed to create %s\n", PES_DIR);
+        return;
+    }
+    mkdir(OBJECTS_DIR, 0755);
+    mkdir(".pes/refs", 0755);
+    mkdir(REFS_DIR, 0755);
 
-    int rc = object_write(OBJ_BLOB, content, strlen(content), &id);
-    assert(rc == 0);
+    if (access(HEAD_FILE, F_OK) != 0) {
+        FILE *f = fopen(HEAD_FILE, "w");
+        if (f) {
+            fprintf(f, "ref: refs/heads/main\n");
+            fclose(f);
+        }
+    }
+
+    printf("Initialized empty PES repository in %s/\n", PES_DIR);
+}
+
+// Usage: pes add <file>...
+void cmd_add(int argc, char *argv[]) {
+    if (argc < 3) {
+        fprintf(stderr, "Usage: pes add <file>...\n");
+        return;
+    }
+
+    Index index;
+    if (index_load(&index) != 0) {
+        fprintf(stderr, "error: failed to load index\n");
+        return;
+    }
+
+    for (int i = 2; i < argc; i++) {
+        if (index_add(&index, argv[i]) != 0) {
+            fprintf(stderr, "error: failed to add '%s'\n", argv[i]);
+        }
+    }
+}
+
+// Usage: pes status
+void cmd_status(void) {
+    Index index;
+    if (index_load(&index) != 0) {
+        fprintf(stderr, "error: failed to load index\n");
+        return;
+    }
+    index_status(&index);
+}
+
+// Usage: pes commit -m <message>
+void cmd_commit(int argc, char *argv[]) {
+    if (argc < 4 || strcmp(argv[2], "-m") != 0) {
+        fprintf(stderr, "error: commit requires a message (-m \"message\")\n");
+        return;
+    }
+
+    const char *message = argv[3];
+    ObjectID commit_id;
+    if (commit_create(message, &commit_id) != 0) {
+        fprintf(stderr, "error: commit failed\n");
+        return;
+    }
 
     char hex[HASH_HEX_SIZE + 1];
-    hash_to_hex(&id, hex);
-    printf("Stored blob with hash: %s\n", hex);
-
-    char path[512];
-    object_path(&id, path, sizeof(path));
-    printf("Object stored at: %s\n", path);
-
-    // Read it back and verify
-    ObjectType type;
-    void *data;
-    size_t len;
-    rc = object_read(&id, &type, &data, &len);
-    assert(rc == 0);
-    assert(type == OBJ_BLOB);
-    assert(len == strlen(content));
-    assert(memcmp(data, content, len) == 0);
-    free(data);
-
-    printf("PASS: blob storage\n");
+    hash_to_hex(&commit_id, hex);
+    printf("Committed: %.12s... %s\n", hex, message);
 }
 
-void test_deduplication(void) {
-    const char *content = "Duplicate content\n";
-    ObjectID id1, id2;
-
-    object_write(OBJ_BLOB, content, strlen(content), &id1);
-    object_write(OBJ_BLOB, content, strlen(content), &id2);
-
-    assert(memcmp(&id1, &id2, sizeof(ObjectID)) == 0);
-
-    printf("PASS: deduplication\n");
+// Callback for commit_walk used by cmd_log.
+static void print_commit(const ObjectID *id, const Commit *commit, void *ctx) {
+    (void)ctx;
+    char hex[HASH_HEX_SIZE + 1];
+    hash_to_hex(id, hex);
+    printf("commit %s\n", hex);
+    printf("Author: %s\n", commit->author);
+    printf("Date:   %llu\n", (unsigned long long)commit->timestamp);
+    printf("\n    %s\n\n", commit->message);
 }
 
-void test_integrity(void) {
-    const char *content = "Test integrity\n";
-    ObjectID id;
-    object_write(OBJ_BLOB, content, strlen(content), &id);
-
-    // Corrupt the stored file
-    char path[512];
-    object_path(&id, path, sizeof(path));
-
-    FILE *f = fopen(path, "r+b");
-    assert(f != NULL);
-    fseek(f, 20, SEEK_SET);
-    fputc('X', f);
-    fclose(f);
-
-    // Read should detect corruption
-    ObjectType type;
-    void *data;
-    size_t len;
-    int rc = object_read(&id, &type, &data, &len);
-    assert(rc == -1);  // Must fail integrity check
-
-    printf("PASS: integrity check\n");
+// Usage: pes log
+void cmd_log(void) {
+    if (commit_walk(print_commit, NULL) != 0) {
+        fprintf(stderr, "No commits yet.\n");
+    }
 }
+
+// ─── PROVIDED: Command dispatch ─────────────────────────────────────────────
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
