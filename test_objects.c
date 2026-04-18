@@ -82,16 +82,30 @@ void test_integrity(void) {
     printf("PASS: integrity check\n");
 }
 
-int main(void) {
-    // Clean slate
-    int rc __attribute__((unused));
-    rc = system("rm -rf .pes");
-    rc = system("mkdir -p .pes/objects .pes/refs/heads");
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: pes <command> [args]\n");
+        fprintf(stderr, "\nCommands:\n");
+        fprintf(stderr, "  init            Create a new PES repository\n");
+        fprintf(stderr, "  add <file>...   Stage files for commit\n");
+        fprintf(stderr, "  status          Show working directory status\n");
+        fprintf(stderr, "  commit -m <msg> Create a commit from staged files\n");
+        fprintf(stderr, "  log             Show commit history\n");
+        return 1;
+    }
 
-    test_blob_storage();
-    test_deduplication();
-    test_integrity();
+    const char *cmd = argv[1];
 
-    printf("\nAll Phase 1 tests passed.\n");
+    if      (strcmp(cmd, "init") == 0)     cmd_init();
+    else if (strcmp(cmd, "add") == 0)      cmd_add(argc, argv);
+    else if (strcmp(cmd, "status") == 0)   cmd_status();
+    else if (strcmp(cmd, "commit") == 0)   cmd_commit(argc, argv);
+    else if (strcmp(cmd, "log") == 0)      cmd_log();
+    else {
+        fprintf(stderr, "Unknown command: %s\n", cmd);
+        fprintf(stderr, "Run 'pes' with no arguments for usage.\n");
+        return 1;
+    }
+
     return 0;
 }
