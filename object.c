@@ -142,8 +142,94 @@ int object_write(ObjectType type, const void *data, size_t len,  ObjectID *id_ou
 //
 // The caller is responsible for calling free(*data_out).
 // Returns 0 on success, -1 on error (file not found, corrupt, etc.).
-int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
-    // TODO: Implement
-    (void)id; (void)type_out; (void)data_out; (void)len_out;
-    return -1;
+int object_read(const ObjectID *id, ObjectType *type_out, void **data_out,
+                size_t *len_out) {
+  // TODO: Implement
+   // Step 1: Build file path
+    char path[512];
+    object_path(id, path, sizeof(path));
+    
+    // Step 2: Open and read entire file
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    if (file_size < 0) {
+        fclose(f);
+        return -1;
+    }
+    
+    uint8_t *file_data = malloc(file_size);
+    if (!file_data) {
+        fclose(f);
+        return -1;
+    }
+    
+    if (fread(file_data, 1, file_size, f) != (size_t)file_size) {
+        free(file_data);
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+    
+    // Step 3: Parse header to extract type and size
+    uint8_t *null_pos = memchr(file_data, '\0', file_size);
+    if (!null_pos) {
+        free(file_data);
+        return -1;
+    }
+    
+    char *header = (char *)file_data;
+    char type_str[16];
+    size_t data_size;
+    if (sscanf(header, "%15s %zu", type_str, &data_size) != 2) {
+        free(file_data);
+        return -1;
+    }
+    
+    // Parse type
+    if (strcmp(type_str, "blob") == 0) {
+        *type_out = OBJ_BLOB;
+    } else if (strcmp(type_str, "tree") == 0) {
+        *type_out = OBJ_TREE;
+    } else if (strcmp(type_str, "commit") == 0) {
+        *type_out = OBJ_COMMIT;
+    } else {
+        free(file_data);
+        return -1;
+    }
+    
+    // Step 4: Verify integrity by recomputing hash
+    ObjectID computed_id;
+    compute_hash(file_data, file_size, &computed_id);
+    
+    if (memcmp(computed_id.hash, id->hash, HASH_SIZE) != 0) {
+        free(file_data);
+        return -1;
+    }
+    
+    // Step 5: Extract data portion (after null terminator)
+    size_t header_len = (null_pos - file_data) + 1;
+    size_t actual_data_len = file_size - header_len;
+    
+    if (actual_data_len != data_size) {
+        free(file_data);
+        return -1;
+    }
+    
+    // Step 6: Allocate and copy data
+    *data_out = malloc(actual_data_len);
+    if (!*data_out) {
+        free(file_data);
+        return -1;
+    }
+    
+    memcpy(*data_out, file_data + header_len, actual_data_len);
+    *len_out = actual_data_len;
+    
+    free(file_data);
+    return 0;
 }
